@@ -1,0 +1,3 @@
+$token,kubelet-bootstrap,10001,"system:node-bootstrapper"
+
+##先执行token会生产一个id数字码手动替换掉$token

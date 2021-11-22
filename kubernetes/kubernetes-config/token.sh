@@ -1,0 +1,1 @@
+token=`head -c 16 /dev/urandom | od -An -t x | tr -d ' '`

@@ -1,0 +1,395 @@
+**Kubernetes-v1.20.9二进制部署说明**
+
+ 
+
+ 
+
+## 一、准备工作
+
+### 1.1 集群规划 
+
+| 角色/主机名 | **IP**       | **组件**                                                     |
+| ----------- | ------------ | ------------------------------------------------------------ |
+| master-01   | 10.115.92.43 | kube-apiserver，kube-controller-manager，kube-scheduler，etcd，nginx，keepalived |
+| master-02   | 10.115.92.44 | kube-apiserver，kube-controller-manager，kube-scheduler，etcd，nginx，keepalived |
+| master-03   | 10.115.92.45 | kube-apiserver，kube-controller-manager，kube-scheduler，etcd |
+| node-01     | 10.115.92.46 | kubelet，kube-proxy，docker，coredns，traefik，calico        |
+| node-02     | 10.115.92.47 | kubelet，kube-proxy，docker，coredns，traefik，calico        |
+
+### 1.2 各组件版本与部署方式规划
+
+| **组件名称**                                            | **版本**     | **部署方式** |
+| ------------------------------------------------------- | ------------ | ------------ |
+| kube-apiserver，kube-scheduler  kube-controller-manager | v1.20.9      | 二进制       |
+| kubelet，kube-proxy                                     | v1.20.9      | 二进制       |
+| etcd                                                    | v3.4.9       | 二进制       |
+| Containerd\|docker                                      | v1.5.1\|1.20 | 二进制       |
+| Dashboard                                               | v2.0.0       | yaml方式交付 |
+| coredns                                                 | v1.8.0       | yaml方式交付 |
+| traefik                                                 | v2.3.6       | yaml方式交付 |
+| Calico（controllers/node）                              | v3.20.2      | yaml方式交付 |
+| calicoctl                                               | v3.20.2      | 二进制       |
+
+ 
+
+### 1.3系统参数
+
+#### 1.3.1 关闭防火墙
+
+systemctl stop firewalld && systemctl disable firewalld
+
+sed -i 's/enforcing/disabled/' /etc/selinux/config # 永久
+
+#### 1.3.2 关闭swap
+
+sed -ri 's/.*swap.*/#&/' /etc/fstab
+
+#### 1.3.3内核参数调优
+
+/k8s/system-config
+
+#### 1.3.4主机名\NTP\系统工具\epel源等
+
+略
+
+#### 1.3.5自签证书工具
+
+ 
+
+### 1.4目录规划
+
+![img](file:///C:/Users/Administrator/AppData/Local/Temp/msohtmlclip1/01/clip_image001.png)
+
+ 
+
+## 二、部署Etcd集群
+
+在master节点部署、集群为基数,建议3\5\7各节点可容忍节点故障(n-1)/2
+
+### 2.1 生成Etcd证书
+
+#### 2.1.1  自签证书颁发机构（CA）
+
+证书请求文件： \k8s\etcd\certs\ ca-csr.json
+
+生成证书：01-create-certs.sh
+
+#### 2.1.2  使用自签CA签发Etcd HTTPS证书
+
+创建证书申请文件：\k8s\etcd\certs\etcd-peer-csr.json|ca-config.json
+
+生成证书：02-create-certs.sh
+
+### 2.3 部署Etcd集群-01节点
+
+#### 2.3.1  二进制文件下载
+
+官网：https://etcd.io/
+
+#### 2.3.2  创建etcd配置文件
+
+/k8s/cetcd-config/etcd.conf
+
+#### 2.3.3  systemd管理etcd
+
+/k8s/cetcd-config/etcd.service
+
+#### 2.3.4  启动并设置开机启动
+
+systemctl daemon-reload && systemctl start etcd && systemctl enable etcd 
+
+ systemctl status etcd
+
+### 2.4 部署Etcd集群02/03节点
+
+#### 2.4.1  文件copy
+
+将01节点/opt/etcd分别copy到02/03节点，对etcd配置文件如下图所示进行调整：
+
+![img](file:///C:/Users/Administrator/AppData/Local/Temp/msohtmlclip1/01/clip_image002.png)
+
+#### 2.4.2  启动并设置开机启动
+
+systemctl daemon-reload && systemctl start etcd && systemctl enable etcd 
+
+ systemctl status etcd
+
+### 2.5 查看集群状态
+
+
+
+/opt/etcd/bin/etcdctl --cacert=/opt/etcd/ssl/ca.pem --cert=/opt/etcd/ssl/etcd-peer.pem --key=/opt/etcd/ssl/etcd-peer-key.pem --endpoints="https://10.115.92.43:2379,https://10.115.92.44:2379,https://10.115.92.45:2379" endpoint health --write-out=table 
+
+![img](file:///C:/Users/Administrator/AppData/Local/Temp/msohtmlclip1/01/clip_image003.png)
+
+## 三、部署kubernetes集群
+
+### 3.1 自签证书
+
+#### 3.1.1. 自签证书颁发机构（CA）
+
+这里我没有复用ETCD的根证书，因为在后续做calico时候发现有很多问题，所以整个k8s集群自身组件使用了单独的ca证书。
+
+证书请求文件： /k8s/kubernetes/certs/ca-csr.json
+
+生成证书：01-create-certs.sh
+
+#### 3.1.2. 使用自签CA签发kube-apiserver HTTPS证书
+
+证书请求文件： /k8s/kubernetes/certs/ca-config.json|server-csr.json
+
+生成证书：02-create-certs.sh
+
+#### 3.1.3. 使用自签CA签发kube-controller-manager证书
+
+证书请求文件： /k8s/kubernetes/certs/ kube-controller-manager-csr.json
+
+生成证书：03-create-certs.sh
+
+#### 3.1.4. 使用现有证书生成kube-controller-manager.kubeconfig文件
+
+生成文件：04-create-controller-manager-kubeconfig.sh
+
+#### 3.1.5 使用自签CA签发kube-scheduler证书
+
+证书请求文件： /k8s/kubernetes/certs/kube-scheduler-csr.json
+
+生成证书：05-create-certs.sh
+
+#### 3.1.6. 使用现有证书生成kube-scheduler.kubeconfig文件
+
+生成文件：06-create-scheduler-kubeconfig.sh
+
+#### 3.1.7. 生成kubectl连接集群的证书
+
+证书请求文件： /k8s/kubernetes/certs/admin-csr.json
+
+生成证书：07- create-certs.sh
+
+#### 3.1.8. 生成config连接集群的证书文件
+
+生成文件：08-create-admin.sh ##存放在/root/.kube/config
+
+#### 3.1.9. 授权kubelet-bootstrap用户允许请求证书
+
+/k8s/kubernetes/certs/09-create-clusterrolebinding.sh
+
+#### 3.1.10. 生成kubelet初次加入集群引导kubeconfig文件
+
+/k8s/kubernetes/certs/10-create-bootstrap-file.sh
+
+#### 3.1.11 使用自签CA签发kube-peoxy证书
+
+证书请求文件： /k8s/kubernetes/certs/kube-proxy-config.yml
+
+生成证书：/k8s/kubernetes/certs/11-create-certs.sh
+
+#### 3.1.6. 使用现有证书生成kube-proxy.kubeconfig文件
+
+生成文件：/k8s/kubernetes/certs/12-create-proxy-kubeconfig.sh
+
+### 3.2 部署apiserver-01节点
+
+#### 3.2.1. 二进制文件下载
+
+
+
+官网：https://kubernetes.io/
+
+下载地址：https://dl.k8s.io/v1.21.0/kubernetes-server-linux-amd64.tar.gz
+
+#### 3.3.2  创建apiserver配置文件以及token.csv文件
+
+/k8s/kubernetes/kubernetes-conifg/kube-apiserver.conf
+
+/k8s/kubernetes/kubernetes-conifg/token.csv
+
+#### 3.3.3  systemd管理kube-apiserver
+
+/k8s/kubernetes/kubernetes-conifg/kube-apiserver.service
+
+#### 3.3.4  启动并设置开机启动
+
+systemctl daemon-reload && systemctl start kube-apiserver && systemctl enable kube-apiserver 
+
+ systemctl status kube-apiserver
+
+### 3.3 部署kube-controller-manager
+
+#### 3.3.1  创建kube-controller-manager配置文件以及token.csv文件
+
+/k8s/kubernetes/kubernetes-conifg/kube-controller-manager.conf
+
+#### 3.3.2  systemd管理kube-controller-manager.conf
+
+/k8s/kubernetes/kubernetes-conifg/kube-controller-manager.service
+
+#### 3.3.3  启动并设置开启启动
+
+### 3.4 部署kube-scheduler
+
+#### 3.4.1  创建kube-scheduler配置文件
+
+/k8s/kubernetes/kubernetes-conifg/kube-scheduler.conf
+
+#### 3.4.2  systemd管理kube-scheduler
+
+/k8s/kubernetes/kubernetes-conifg/kube-scheduler.service
+
+#### 3.4.3  启动并设置开启启动
+
+略
+
+#### 3.4.4 查看集群状态 
+
+创建kubectl连接集群证书文件config，并存放到/root/.kube/下
+
+![img](file:///C:/Users/Administrator/AppData/Local/Temp/msohtmlclip1/01/clip_image004.png)
+
+如上输出说明Master节点组件运行正常。
+
+### .3.5 部署kubelet
+
+#### 3.5.1  创建kubele配置与参数文件
+
+/k8s/kubernetes/kubernetes-conifg/kubelet.conf
+
+/k8s/kubernetes/kubernetes-conifg/kubelet-config.yml
+
+#### 3.5.2  systemd管理kubele
+
+/k8s/kubernetes/kubernetes-conifg/kubelet.service
+
+#### 3.5.3  启动并设置开机启动
+
+略
+
+#### 3.5.4 授权添加到集群
+
+Kubelet组件启动成功后，在master节点查看证书请求如下：
+
+![img](file:///C:/Users/Administrator/AppData/Local/Temp/msohtmlclip1/01/clip_image006.png)
+
+批准申请：
+
+kubectl certificate approve node-csr-MoZW4ICSZdVN0wIw6J9spkZ6lhrXskR5luMH_NvMBPA
+
+![img](file:///C:/Users/Administrator/AppData/Local/Temp/msohtmlclip1/01/clip_image008.png)
+
+### .3.6 部署kube-proxy
+
+#### 3.6.1  安装ipvsadm及添加ipvs模块到内核
+
+/k8s/system-config/ipvs.sh
+
+#### 3.6.2创建kube-proxy配置与参数文件
+
+/k8s/kubernetes/kubernetes-conifg/proxy.conf
+
+/k8s/kubernetes/kubernetes-conifg/proxy-config.yml
+
+#### 3.6.3  systemd管理kubele
+
+/k8s/kubernetes/kubernetes-conifg/kubelet.service
+
+#### 3.6.4  启动并设置开机启动
+
+略
+
+## 三、部署网络组件calico
+
+官网：https://www.tigera.io/
+
+下载地址：
+
+https://docs.projectcalico.org/manifests/calico-etcd.yaml
+
+[https://github.com/projectcalico/calicoctl/releases/tag/v3.20.](https://github.com/projectcalico/calicoctl/releases/tag/v3.20.1)2 #二进制 
+
+https://github.com/projectcalico/calicoctl/releases/download/v3.20.2/calicoctl  ##工具
+
+网上有很多关于calico的技术文档，但包括官网在内99%的技术文档都是：
+
+kubectl apply –f calico.yaml 一条命令就完事了，但实际远远不是这么简单，我在多个环境上尝试多次100%不会成功。
+
+### 3.1 下载calico部署yaml
+
+由于现在etcd集群启用了https，一定要下载支持支持https的yaml文件。
+
+/k8s/kubernetes/yaml/calico/calico.yaml
+
+### 3.2 etcd证书转换
+
+因为calico要连接到etcd作为数据存储，yaml配置文件中etcd证书文件需要转成64位字符：
+
+cat etcd-peer.pem | base64 -w 0
+
+cat etcd-peer-key.pem | base64 -w 0
+
+cat ca.pem | base64 -w 0
+
+### 3.3 启动calico
+
+调整完证书以及k8s集群pod网段“ CALICO_IPV4POOL_CIDR”候就可以apply了。
+
+kubectl apply –f calico.yaml
+
+![img](file:///C:/Users/Administrator/AppData/Local/Temp/msohtmlclip1/01/clip_image009.png)
+
+### 3.4 安装calicoctl
+
+ wget -O /usr/local/bin/calicoctl https://github.com/projectcalico/calicoctl/releases/download/v3.20.2/calicoctl 
+
+chmod a+x /usr/local/bin/calicoctl 验证calicoctl命令：
+
+ 
+
+![img](file:///C:/Users/Administrator/AppData/Local/Temp/msohtmlclip1/01/clip_image010.png)
+
+## 四、部署Dashboard、CoreDNS、traefik
+
+### 4.1 部署Dashboard
+
+https://raw.githubusercontent.com/kubernetes/dashboard/v2.0.0-rc1/aio/deploy/recommended.yaml
+
+/k8s/kubernetes/yaml/dashboard/dashboard.yaml
+
+Kubectl apply –f dashboard.yaml
+
+为了验证可以临时调整dashboard的svc为nodeport类型，通过node节点+端口进行访问验证
+
+访问地址：https://NodeIP:30001
+
+![img](file:///C:/Users/Administrator/AppData/Local/Temp/msohtmlclip1/01/clip_image012.png)
+
+创建认证通过token登陆：
+
+kubectl create serviceaccount dashboard-admin -n kube-system
+
+kubectl create clusterrolebinding dashboard-admin --clusterrole=cluster-admin --serviceaccount=kube-system:dashboard-admin
+
+kubectl describe secrets -n kube-system $(kubectl -n kube-system get secret | awk '/dashboard-admin/{print $1}')
+
+### 4.2 部署CoreDNS
+
+官网：https://github.com/coredns/coredns
+
+下载地址：
+
+https://github.com/coredns/deployment/blob/master/kubernetes/coredns.yaml.sed
+
+https://github.com/kubernetes/kubernetes/blob/master/cluster/addons/dns/coredns/coredns.yaml.base
+
+部署：
+
+/k8s/kubernetes/yaml/dashboard/dashboard.yaml
+
+Kubectl –f apply dashboard.yaml #需调整coredns的clusterIP
+
+### 4.3 部署traefik
+
+官网：https://traefik.io/  https://traefik.cn/
+
+部署步骤参考：http://www.mydlq.club/article/100/
+
+![img](file:///C:/Users/Administrator/AppData/Local/Temp/msohtmlclip1/01/clip_image014.png)
