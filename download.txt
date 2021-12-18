@@ -7,3 +7,4 @@ dashboard-yaml：https://raw.githubusercontent.com/kubernetes/dashboard/v2.0.0-r
 coredns-yaml：https://github.com/kubernetes/kubernetes/blob/master/cluster/addons/dns/coredns/coredns.yaml.base
 traefik：http://www.mydlq.club/article/100/
 ###
+#
