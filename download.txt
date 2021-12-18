@@ -1,0 +1,10 @@
+##K8S集群各组件下载地址参考
+etcd：https://github.com/etcd-io/etcd/releases/download/v3.4.9/etcd-v3.4.9-linux-amd64.tar.gz
+kubernetes：https://dl.k8s.io/v1.20.9/kubernetes-server-linux-amd64.tar.gz
+calico-yaml：https://docs.projectcalico.org/manifests/calico-etcd.yaml
+calicoctl：https://github.com/projectcalico/calicoctl/releases/download/v3.20.2/calicoctl 
+dashboard-yaml：https://raw.githubusercontent.com/kubernetes/dashboard/v2.0.0-rc1/aio/deploy/recommended.yaml
+coredns-yaml：https://github.com/kubernetes/kubernetes/blob/master/cluster/addons/dns/coredns/coredns.yaml.base
+traefik：http://www.mydlq.club/article/100/
+###
+#
